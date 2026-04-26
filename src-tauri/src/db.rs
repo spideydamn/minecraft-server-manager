@@ -137,7 +137,7 @@ pub fn is_version_in_use(profile_id: i64, version_id: &str) -> anyhow::Result<bo
             "SELECT in_use FROM minecraft_versions WHERE profile_id = ?1 AND version_id = ?2",
             rusqlite::params![profile_id, version_id],
             |row| row.get(0),
-        )?;
+        ).unwrap_or(0);
         Ok(in_use == 1)
     })
 }
@@ -156,6 +156,17 @@ pub fn set_version_in_use(profile_id: i64, version_id: &str, in_use: bool) -> an
 /// Get servers using a specific version (for error messages)
 pub fn get_servers_using_version(profile_id: i64, version_id: &str) -> anyhow::Result<Vec<String>> {
     with_conn(|conn| {
+        // Check in_use status directly to avoid nested with_conn deadlock
+        let in_use: i64 = conn.query_row(
+            "SELECT in_use FROM minecraft_versions WHERE profile_id = ?1 AND version_id = ?2",
+            rusqlite::params![profile_id, version_id],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        if in_use != 1 {
+            return Ok(vec![]);
+        }
+
         let mut stmt = conn.prepare(
             "SELECT name FROM connection_profiles WHERE id = ?1"
         )?;
@@ -163,12 +174,6 @@ pub fn get_servers_using_version(profile_id: i64, version_id: &str) -> anyhow::R
             row.get(0)
         }).unwrap_or_else(|_| format!("Profile {}", profile_id));
 
-        // For now, return the profile name if version is in use
-        // This can be expanded when server lifecycle management is added
-        if is_version_in_use(profile_id, version_id)? {
-            Ok(vec![profile_name])
-        } else {
-            Ok(vec![])
-        }
+        Ok(vec![profile_name])
     })
 }

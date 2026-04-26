@@ -143,7 +143,7 @@ pub async fn reinstall_version(app_handle: tauri::AppHandle, profile_id: i64, ve
     if in_use {
         let servers = crate::db::get_servers_using_version(profile_id, &version_id)
             .map_err(|e| e.to_string())?;
-        // Return warning but allow reinstall
+        // Block reinstall when version is in use to prevent affecting running servers
         return Err(format!("Warning: Version {} is in use by: {}. Reinstalling may affect running servers.", version_id, servers.join(", ")));
     }
 
