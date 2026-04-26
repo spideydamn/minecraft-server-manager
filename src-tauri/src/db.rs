@@ -155,7 +155,11 @@ pub fn set_version_in_use(profile_id: i64, version_id: &str, in_use: bool) -> an
             rusqlite::params![if in_use { 1 } else { 0 }, profile_id, version_id],
         )?;
         if rows_affected == 0 {
-            anyhow::bail!("No version found for profile_id {} and version_id {}", profile_id, version_id);
+            anyhow::bail!(
+                "No matching version found for profile_id={}, version_id={}",
+                profile_id,
+                version_id
+            );
         }
         Ok(())
     })
