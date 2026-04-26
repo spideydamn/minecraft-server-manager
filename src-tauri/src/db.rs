@@ -48,13 +48,13 @@ pub fn init(path: &str) -> Result<()> {
 
 fn migrate_add_server_dir(conn: &Connection) -> Result<()> {
     // Check if server_dir column exists in connection_profiles
-    let has_column: Result<bool> = conn.query_row(
+    let has_column: bool = conn.query_row(
         "SELECT COUNT(*) > 0 FROM pragma_table_info('connection_profiles') WHERE name = 'server_dir'",
         [],
         |row| row.get(0),
-    );
+    )?;
 
-    if let Ok(false) = has_column {
+    if !has_column {
         conn.execute(
             "ALTER TABLE connection_profiles ADD COLUMN server_dir TEXT NOT NULL DEFAULT '~/minecraft'",
             [],
@@ -66,13 +66,13 @@ fn migrate_add_server_dir(conn: &Connection) -> Result<()> {
 
 fn migrate_version_management_fields(conn: &Connection) -> Result<()> {
     // Check if in_use column exists in minecraft_versions
-    let has_in_use: Result<bool> = conn.query_row(
+    let has_in_use: bool = conn.query_row(
         "SELECT COUNT(*) > 0 FROM pragma_table_info('minecraft_versions') WHERE name = 'in_use'",
         [],
         |row| row.get(0),
-    );
+    )?;
 
-    if let Ok(false) = has_in_use {
+    if !has_in_use {
         conn.execute(
             "ALTER TABLE minecraft_versions ADD COLUMN in_use INTEGER NOT NULL DEFAULT 0",
             [],
@@ -80,13 +80,13 @@ fn migrate_version_management_fields(conn: &Connection) -> Result<()> {
     }
 
     // Check if installation_date column exists in minecraft_versions
-    let has_installation_date: Result<bool> = conn.query_row(
+    let has_installation_date: bool = conn.query_row(
         "SELECT COUNT(*) > 0 FROM pragma_table_info('minecraft_versions') WHERE name = 'installation_date'",
         [],
         |row| row.get(0),
-    );
+    )?;
 
-    if let Ok(false) = has_installation_date {
+    if !has_installation_date {
         // SQLite doesn't support non-constant defaults in ALTER TABLE
         // Add column with a constant default, then update existing rows
         conn.execute(
@@ -150,10 +150,13 @@ pub fn is_version_in_use(profile_id: i64, version_id: &str) -> anyhow::Result<bo
 /// Update version in-use status
 pub fn set_version_in_use(profile_id: i64, version_id: &str, in_use: bool) -> anyhow::Result<()> {
     with_conn(|conn| {
-        conn.execute(
+        let rows_affected = conn.execute(
             "UPDATE minecraft_versions SET in_use = ?1 WHERE profile_id = ?2 AND version_id = ?3",
             rusqlite::params![if in_use { 1 } else { 0 }, profile_id, version_id],
         )?;
+        if rows_affected == 0 {
+            anyhow::bail!("No version found for profile_id {} and version_id {}", profile_id, version_id);
+        }
         Ok(())
     })
 }
