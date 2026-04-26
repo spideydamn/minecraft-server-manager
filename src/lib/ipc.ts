@@ -4,9 +4,9 @@ import type { ConnectionProfile } from "../types/connection";
 // --- Connection Profiles ---
 export const listProfiles = () => invoke<ConnectionProfile[]>("list_profiles");
 export const createProfile = (p: Omit<ConnectionProfile, "id">) =>
-  invoke<number>("create_profile", { ...p, authMethod: p.authMethod });
+  invoke<number>("create_profile", { profile: { ...p, authMethod: p.authMethod } });
 export const updateProfile = (p: ConnectionProfile) =>
-  invoke<void>("update_profile", { ...p });
+  invoke<void>("update_profile", { id: p.id, profile: { ...p, authMethod: p.authMethod } });
 export const deleteProfile = (id: number) =>
   invoke<void>("delete_profile", { id });
 

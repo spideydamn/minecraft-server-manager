@@ -13,6 +13,18 @@ pub struct ConnectionProfileRow {
     pub key_path: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileUpdate {
+    pub name: String,
+    pub host: String,
+    pub port: i64,
+    pub username: String,
+    pub auth_method: String,
+    pub password: Option<String>,
+    pub key_path: Option<String>,
+}
+
 #[tauri::command]
 pub fn list_profiles() -> Result<Vec<ConnectionProfileRow>, String> {
     db::with_conn(|conn| {
@@ -36,20 +48,12 @@ pub fn list_profiles() -> Result<Vec<ConnectionProfileRow>, String> {
 }
 
 #[tauri::command]
-pub fn create_profile(
-    name: String,
-    host: String,
-    port: i64,
-    username: String,
-    auth_method: String,
-    password: Option<String>,
-    key_path: Option<String>,
-) -> Result<i64, String> {
+pub fn create_profile(profile: ProfileUpdate) -> Result<i64, String> {
     db::with_conn(|conn| {
         conn.execute(
             "INSERT INTO connection_profiles (name, host, port, username, auth_method, password, key_path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![name, host, port, username, auth_method, password, key_path],
+            rusqlite::params![profile.name, profile.host, profile.port, profile.username, profile.auth_method, profile.password, profile.key_path],
         )?;
         Ok(conn.last_insert_rowid())
     })
@@ -57,21 +61,12 @@ pub fn create_profile(
 }
 
 #[tauri::command]
-pub fn update_profile(
-    id: i64,
-    name: String,
-    host: String,
-    port: i64,
-    username: String,
-    auth_method: String,
-    password: Option<String>,
-    key_path: Option<String>,
-) -> Result<(), String> {
+pub fn update_profile(id: i64, profile: ProfileUpdate) -> Result<(), String> {
     db::with_conn(|conn| {
         conn.execute(
             "UPDATE connection_profiles SET name=?1, host=?2, port=?3, username=?4,
              auth_method=?5, password=?6, key_path=?7 WHERE id=?8",
-            rusqlite::params![name, host, port, username, auth_method, password, key_path, id],
+            rusqlite::params![profile.name, profile.host, profile.port, profile.username, profile.auth_method, profile.password, profile.key_path, id],
         )?;
         Ok(())
     })
