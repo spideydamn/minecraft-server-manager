@@ -1,17 +1,30 @@
 import { useState, useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { listMcVersions, installServerVersion, getServerConfig } from "../../lib/ipc";
+import { listMcVersions, installServerVersion, getServerConfig, listInstalledVersions, deleteVersion, reinstallVersion } from "../../lib/ipc";
 
 interface Props {
   profileId: number;
 }
 interface Version { id: string; type: string; releaseTime: string; }
 
+interface InstalledVersion {
+  versionId: string;
+  jarName: string;
+  serverDir: string;
+  inUse: boolean;
+  installationDate: string;
+}
+
 // Matches the LogLine struct emitted by the Rust backend
 interface LogLine {
   raw: string;
   level: "Info" | "Warn" | "Error" | "Other";
   timestamp: string | null;
+}
+
+interface VersionChangedEvent {
+  version_id: string;
+  change_type: "installed" | "deleted" | "reinstalled" | "status-changed";
 }
 
 export function VersionPanel({ profileId }: Props) {
@@ -22,23 +35,38 @@ export function VersionPanel({ profileId }: Props) {
   const [installed, setInstalled] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Installed versions state
+  const [installedVersions, setInstalledVersions] = useState<InstalledVersion[]>([]);
+  const [loadingInstalled, setLoadingInstalled] = useState(false);
+
   // Install progress state
   const [installing, setInstalling] = useState(false);
   const [installLogs, setInstallLogs] = useState<LogLine[]>([]);
   const [installDone, setInstallDone] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
 
+  // Version operation state
+  const [operationInProgress, setOperationInProgress] = useState<{ type: "delete" | "reinstall"; versionId: string } | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
+
   const logEndRef = useRef<HTMLDivElement>(null);
   const unlistenRef = useRef<UnlistenFn | null>(null);
+  const versionChangedUnlistenRef = useRef<UnlistenFn | null>(null);
 
   useEffect(() => {
     loadVersions();
     loadConfig();
-    // Cleanup listener on unmount
+    loadInstalledVersions();
+    setupVersionChangedListener();
+    // Cleanup listeners on unmount
     return () => {
       if (unlistenRef.current) {
         unlistenRef.current();
         unlistenRef.current = null;
+      }
+      if (versionChangedUnlistenRef.current) {
+        versionChangedUnlistenRef.current();
+        versionChangedUnlistenRef.current = null;
       }
     };
   }, [profileId]);
@@ -81,6 +109,33 @@ export function VersionPanel({ profileId }: Props) {
       const cfg = await getServerConfig(profileId);
       setInstalled(cfg.minecraft_version ?? null);
     } catch {}
+  }
+
+  async function loadInstalledVersions() {
+    setLoadingInstalled(true);
+    try {
+      const versions = await listInstalledVersions(profileId);
+      setInstalledVersions(versions);
+    } catch (e: any) {
+      console.error("Failed to load installed versions:", e);
+    } finally {
+      setLoadingInstalled(false);
+    }
+  }
+
+  async function setupVersionChangedListener() {
+    if (versionChangedUnlistenRef.current) {
+      versionChangedUnlistenRef.current();
+      versionChangedUnlistenRef.current = null;
+    }
+    try {
+      const unlisten = await listen<VersionChangedEvent>("version_changed", () => {
+        loadInstalledVersions();
+      });
+      versionChangedUnlistenRef.current = unlisten;
+    } catch (e) {
+      console.error("Failed to setup version_changed listener:", e);
+    }
   }
 
   async function handleInstall() {
@@ -138,6 +193,62 @@ export function VersionPanel({ profileId }: Props) {
     setInstallLogs([]);
     setInstallDone(false);
     setInstallError(null);
+  }
+
+  async function handleDeleteVersion(versionId: string) {
+    setOperationInProgress({ type: "delete", versionId });
+    setOperationError(null);
+    try {
+      await deleteVersion(profileId, versionId);
+      await loadInstalledVersions();
+    } catch (e: any) {
+      console.error("DEBUG: deleteVersion failed:", e);
+      setOperationError(e.toString());
+    } finally {
+      setOperationInProgress(null);
+    }
+  }
+
+  async function handleReinstallVersion(versionId: string) {
+    setOperationInProgress({ type: "reinstall", versionId });
+    setOperationError(null);
+
+    // Reset log drawer state and start reinstall
+    setInstallLogs([]);
+    setInstallDone(false);
+    setInstallError(null);
+    setError(null);
+    setInstalling(true);
+
+    // Subscribe to install_log events BEFORE starting reinstall
+    if (unlistenRef.current) {
+      unlistenRef.current();
+      unlistenRef.current = null;
+    }
+
+    let unlisten: (() => void) | null = null;
+    try {
+      unlisten = await listen<LogLine>("install_log", (event) => {
+        setInstallLogs(prev => [...prev, event.payload]);
+      });
+      unlistenRef.current = unlisten;
+
+      await reinstallVersion(profileId, versionId);
+      await loadInstalledVersions();
+      setInstallDone(true);
+    } catch (e: any) {
+      setInstallError(e.toString());
+    } finally {
+      setInstalling(false);
+      // Keep listener alive a bit longer to catch final events, then remove
+      setTimeout(() => {
+        if (unlistenRef.current) {
+          unlistenRef.current();
+          unlistenRef.current = null;
+        }
+      }, 500);
+      setOperationInProgress(null);
+    }
   }
 
   function logLineColor(level: LogLine["level"]): string {
@@ -205,6 +316,78 @@ export function VersionPanel({ profileId }: Props) {
           )}
         </div>
       </div>
+
+      {/* Installed Versions List */}
+      <div className="bg-gray-800 rounded-lg p-6 mt-6">
+        <h3 className="font-semibold text-gray-200 mb-4">Installed Versions</h3>
+
+        {loadingInstalled ? (
+          <div className="text-gray-400 text-center py-8">Loading installed versions...</div>
+        ) : installedVersions.length === 0 ? (
+          <div className="text-gray-400 text-center py-8">No versions installed yet</div>
+        ) : (
+          <div className="space-y-3">
+            {installedVersions.map((v, index) => {
+              return (
+              <div
+                key={index}
+                className={`bg-gray-900 rounded-lg p-4 border ${
+                  v.inUse ? "border-blue-600" : "border-gray-700"
+                } hover:border-gray-600 transition-colors`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h4 className="font-semibold text-gray-200">{v.versionId}</h4>
+                      {v.inUse && (
+                        <span className="px-2 py-0.5 bg-blue-600/20 text-blue-400 text-xs rounded border border-blue-600/40">
+                          In Use
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-400 space-y-1">
+                      <div>JAR: {v.jarName}</div>
+                      <div>Directory: {v.serverDir}</div>
+                      <div>Installed: {new Date(v.installationDate).toLocaleString()}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 ml-4">
+                    <button
+                      onClick={() => handleReinstallVersion(v.versionId)}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+                      title="Reinstall this version"
+                    >
+                      {operationInProgress?.type === "reinstall" && operationInProgress?.versionId === v.versionId
+                        ? "Reinstalling..."
+                        : "Reinstall"}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleDeleteVersion(v.versionId);
+                      }}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-sm rounded transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+                      title="Delete this version"
+                    >
+                      {operationInProgress?.type === "delete" && operationInProgress?.versionId === v.versionId
+                        ? "Deleting..."
+                        : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {operationError && (
+        <div className="mt-4 bg-red-900/40 border border-red-700 text-red-300 rounded p-3">
+          {operationError}
+        </div>
+      )}
 
       {/* Install log drawer */}
       {showDrawer && (
