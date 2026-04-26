@@ -103,9 +103,10 @@ fn migrate_version_management_fields(conn: &Connection) -> Result<()> {
 
     // Fix records where jar_name contains a directory path instead of jar filename
     // This happens when jar_name was incorrectly saved as the version directory path
+    // Use raw version_id to match the installer format (minecraft_server_{version_id}.jar)
     conn.execute(
         "UPDATE minecraft_versions
-         SET jar_name = 'minecraft_server_' || replace(version_id, '.', '-') || '.jar',
+         SET jar_name = 'minecraft_server_' || version_id || '.jar',
              server_dir = jar_name
          WHERE jar_name LIKE '%minecraft-server-%'
            AND jar_name NOT LIKE '%.jar'",
@@ -133,11 +134,15 @@ where
 /// Check if a version is in use by any active servers
 pub fn is_version_in_use(profile_id: i64, version_id: &str) -> anyhow::Result<bool> {
     with_conn(|conn| {
-        let in_use: i64 = conn.query_row(
+        let in_use: i64 = match conn.query_row(
             "SELECT in_use FROM minecraft_versions WHERE profile_id = ?1 AND version_id = ?2",
             rusqlite::params![profile_id, version_id],
             |row| row.get(0),
-        ).unwrap_or(0);
+        ) {
+            Ok(val) => val,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
         Ok(in_use == 1)
     })
 }
@@ -157,11 +162,15 @@ pub fn set_version_in_use(profile_id: i64, version_id: &str, in_use: bool) -> an
 pub fn get_servers_using_version(profile_id: i64, version_id: &str) -> anyhow::Result<Vec<String>> {
     with_conn(|conn| {
         // Check in_use status directly to avoid nested with_conn deadlock
-        let in_use: i64 = conn.query_row(
+        let in_use: i64 = match conn.query_row(
             "SELECT in_use FROM minecraft_versions WHERE profile_id = ?1 AND version_id = ?2",
             rusqlite::params![profile_id, version_id],
             |row| row.get(0),
-        ).unwrap_or(0);
+        ) {
+            Ok(val) => val,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(vec![]),
+            Err(e) => return Err(e.into()),
+        };
 
         if in_use != 1 {
             return Ok(vec![]);
@@ -170,9 +179,13 @@ pub fn get_servers_using_version(profile_id: i64, version_id: &str) -> anyhow::R
         let mut stmt = conn.prepare(
             "SELECT name FROM connection_profiles WHERE id = ?1"
         )?;
-        let profile_name: String = stmt.query_row(rusqlite::params![profile_id], |row| {
+        let profile_name: String = match stmt.query_row(rusqlite::params![profile_id], |row| {
             row.get(0)
-        }).unwrap_or_else(|_| format!("Profile {}", profile_id));
+        }) {
+            Ok(name) => name,
+            Err(rusqlite::Error::QueryReturnedNoRows) => format!("Profile {}", profile_id),
+            Err(e) => return Err(e.into()),
+        };
 
         Ok(vec![profile_name])
     })
