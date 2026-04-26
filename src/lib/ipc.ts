@@ -31,6 +31,12 @@ export const listMcVersions = (includeSnapshots: boolean) =>
   invoke<{ id: string; type: string; releaseTime: string }[]>("list_mc_versions", { includeSnapshots });
 export const installServerVersion = (profileId: number, versionId: string) =>
   invoke<string>("install_server_version", { profileId, versionId });
+export const listInstalledVersions = (profileId: number) =>
+  invoke<{ versionId: string; jarName: string; serverDir: string; inUse: boolean; installationDate: string }[]>("list_installed_versions", { profileId });
+export const deleteVersion = (profileId: number, versionId: string) =>
+  invoke<string>("delete_version", { profileId, versionId });
+export const reinstallVersion = (profileId: number, versionId: string) =>
+  invoke<string>("reinstall_version", { profileId, versionId });
 
 // --- Settings ---
 export const getServerConfig = (profileId: number) =>

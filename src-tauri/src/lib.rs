@@ -35,6 +35,8 @@ pub fn run() {
             commands::versions::list_mc_versions,
             commands::versions::install_server_version,
             commands::versions::list_installed_versions,
+            commands::versions::delete_version,
+            commands::versions::reinstall_version,
             // Settings commands
             commands::settings::load_server_settings,
             commands::settings::save_server_settings,
