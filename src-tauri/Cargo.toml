@@ -1,0 +1,49 @@
+[package]
+name = "minecraft-server-manager"
+version = "0.1.0"
+description = "Desktop UI for managing a Minecraft server on a remote VM via SSH"
+authors = ["you"]
+license = ""
+repository = ""
+default-run = "minecraft-server-manager"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "minecraft_server_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "minecraft-server-manager"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+russh = "0.44"
+russh-keys = "0.44"
+russh-sftp = "2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+sha1 = "0.10"
+hex = "0.4"
+regex = "1"
+anyhow = "1"
+log = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+zip = "2"
+once_cell = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
